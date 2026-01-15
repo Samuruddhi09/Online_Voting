@@ -52,7 +52,7 @@ def register():
         
         existing_user = cursor.execute(""" 
            SELECT * FROM users
-           WHERE email = ? OR aadhaar_number = ? OR voter_id = ?                            
+            WHERE email = ? OR aadhaar_number = ? OR voter_id = ?                            
         
         """, (email, aadhaar_number, voter_id)).fetchone()
         
@@ -74,6 +74,133 @@ def register():
         return redirect(url_for("register"))
 
     return render_template("registration.html")
+
+from werkzeug.security import check_password_hash
+from flask import session, flash, redirect, url_for
+
+from flask import session
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        voter_id = request.form["voter_id"]
+        password = request.form["password"]
+
+        conn = get_db_connection()
+        user = conn.execute(
+            "SELECT * FROM users WHERE voter_id = ?",
+            (voter_id,)
+        ).fetchone()
+        conn.close()
+
+        if user is None:
+            flash("Voter ID not registered")
+            return redirect(url_for("login"))
+
+        if not check_password_hash(user["password"], password):
+            flash("Incorrect password")
+            return redirect(url_for("login"))
+
+        # ✅ CREATE SESSION
+        session["user_id"] = user["id"]
+        session["voter_id"] = user["voter_id"]
+        session["role"] = user["role"]
+
+        # ✅ ROLE BASED REDIRECT
+        if user["role"] == "admin":
+            return redirect(url_for("admin_dashboard"))
+        else:
+            return redirect(url_for("voter_dashboard"))
+
+    return render_template("login.html")
+
+@app.route("/admin")
+def admin_dashboard():
+    if not admin_required():
+        return redirect(url_for("login"))
+    return render_template("admin_dashboard.html")
+
+@app.route("/admin/users")
+def admin_users():
+    if not admin_required():
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    users = conn.execute("""
+        SELECT id, full_name, email, voter_id, role
+        FROM users
+        WHERE id != ?
+    """, (session["user_id"],)).fetchall()
+    conn.close()
+
+    return render_template("admin_users.html", users=users)
+
+@app.route("/admin/delete-user/<int:user_id>", methods=["POST"])
+def delete_user(user_id):
+    if not admin_required():
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    flash("User deleted successfully")
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/update-role/<int:user_id>", methods=["POST"])
+def update_role(user_id):
+    if not admin_required():
+        return redirect(url_for("login"))
+
+    new_role = request.form["role"]
+
+    conn = get_db_connection()
+    conn.execute(
+        "UPDATE users SET role = ? WHERE id = ?",
+        (new_role, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("User role updated")
+    return redirect(url_for("admin_users"))
+
+def create_super_admin():
+    conn = get_db_connection()
+    admin = conn.execute(
+        "SELECT * FROM users WHERE voter_id = ?",
+        ("SUPERADMIN",)
+    ).fetchone()
+
+    if admin is None:
+        conn.execute("""
+            INSERT INTO users
+            (full_name, email, password, aadhaar_number, voter_id, role)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            "Super Admin",
+            "superadmin@ovs.com",
+            generate_password_hash("admin123"),
+            "000000000000",
+            "SUPERADMIN",
+            "admin"
+        ))
+        conn.commit()
+
+    conn.close()
+
+
+@app.route("/voter")
+def voter_dashboard():
+    return "Welcome Voter! Session active."
+
+def admin_required():
+    if "user_id" not in session or session.get("role") != "admin":
+        flash("Admin access required")
+        return False
+    return True
 
 
 
@@ -179,16 +306,16 @@ def view_users():
     result = ""
     for user in users:
         result += (
-    f"ID: {user['id']}, "
-    f"Name: {user['full_name']}, "
-    f"Email: {user['email']}, "
-    f"Aadhaar: {user['aadhaar_number']}, "
-    f"Voter ID: {user['voter_id']}, "
-    f"Role: {user['role']}<br>"
-)
-
+            f"ID: {user['id']}, "
+            f"Name: {user['full_name']}, "
+            f"Email: {user['email']}, "
+            f"Aadhaar: {user['aadhaar_number']}, "
+            f"Voter ID: {user['voter_id']}, "
+            f"Role: {user['role']}<br>"
+        )
 
     return result
+
 
 
 @app.route("/view-elections")
