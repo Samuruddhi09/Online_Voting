@@ -1,11 +1,17 @@
-from flask import Flask, render_template, request, flash, redirect, url_for
+from flask import Flask, render_template, request, flash, redirect, url_for, session
 import sqlite3
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash,check_password_hash
+from functools import wraps
+
+
+
 
 
 app = Flask(__name__)
 app.secret_key = "dev-secret-key"
 
+
+# DATABASE
 DATABASE = "database.db"
 
 def get_db_connection():
@@ -13,6 +19,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Register Page
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
@@ -75,11 +82,7 @@ def register():
 
     return render_template("registration.html")
 
-from werkzeug.security import check_password_hash
-from flask import session, flash, redirect, url_for
-
-from flask import session
-
+# Login Page
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -101,12 +104,10 @@ def login():
             flash("Incorrect password")
             return redirect(url_for("login"))
 
-        # ✅ CREATE SESSION
         session["user_id"] = user["id"]
         session["voter_id"] = user["voter_id"]
         session["role"] = user["role"]
 
-        # ✅ ROLE BASED REDIRECT
         if user["role"] == "admin":
             return redirect(url_for("admin_dashboard"))
         else:
@@ -114,17 +115,37 @@ def login():
 
     return render_template("login.html")
 
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please login first", "danger")
+            return redirect(url_for("login"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if session.get("role") != "admin":
+            flash("Admin access required", "danger")
+            return redirect(url_for("login"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+# Admin and Functions
 @app.route("/admin")
+@admin_required
+@login_required
 def admin_dashboard():
-    if not admin_required():
-        return redirect(url_for("login"))
     return render_template("admin_dashboard.html")
 
-@app.route("/admin/users")
-def admin_users():
-    if not admin_required():
-        return redirect(url_for("login"))
 
+@app.route("/admin/users")
+@admin_required
+@login_required
+def admin_users():
     conn = get_db_connection()
     users = conn.execute("""
         SELECT id, full_name, email, voter_id, role
@@ -135,28 +156,74 @@ def admin_users():
 
     return render_template("admin_users.html", users=users)
 
-@app.route("/admin/delete-user/<int:user_id>", methods=["POST"])
-def delete_user(user_id):
-    if not admin_required():
-        return redirect(url_for("login"))
 
+@app.route("/admin/delete-user/<int:user_id>", methods=["POST"])
+@admin_required
+@login_required
+def delete_user(user_id):
     conn = get_db_connection()
+    
+    target_user = conn.execute(
+        "SELECT id, voter_id FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    
+    if target_user is None:
+        conn.close()
+        flash("User not found", "danger")
+        return redirect(url_for("admin_users"))
+    
+    if target_user["id"] == session["user_id"]:
+        conn.close()
+        flash("You cannot delete your own account", "danger")
+        return redirect(url_for("admin_users"))
+    
+    if target_user["voter_id"] == "SUPERADMIN":
+        conn.close()
+        flash("SUPERADMIN cannot be deleted", "danger")
+        return redirect(url_for("admin_users"))
+    
+    
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
 
-    flash("User deleted successfully")
+    flash("User deleted successfully", "success")
     return redirect(url_for("admin_users"))
 
 
-@app.route("/admin/update-role/<int:user_id>", methods=["POST"])
-def update_role(user_id):
-    if not admin_required():
-        return redirect(url_for("login"))
 
+@app.route("/admin/update-role/<int:user_id>", methods=["POST"])
+@admin_required
+@login_required
+def update_role(user_id):
     new_role = request.form["role"]
 
     conn = get_db_connection()
+    
+    target_user = conn.execute(
+        "SELECT id, voter_id, role FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    
+    
+    if target_user is None:
+        conn.close()
+        flash("User not found", "danger")
+        return redirect(url_for("admin_users"))
+    
+    if target_user["voter_id"] == "SUPERADMIN":
+        conn.close()
+        flash("SUPERADMIN role cannot be changed", "danger")
+        return redirect(url_for("admin_users"))
+    
+    if target_user["id"] == session["user_id"]:
+        conn.close()
+        flash("You cannot change your own role", "danger")
+        return redirect(url_for("admin_users"))
+    
+    
+    
     conn.execute(
         "UPDATE users SET role = ? WHERE id = ?",
         (new_role, user_id)
@@ -164,9 +231,11 @@ def update_role(user_id):
     conn.commit()
     conn.close()
 
-    flash("User role updated")
+    flash("User role updated", "success")
     return redirect(url_for("admin_users"))
 
+
+# Super_admin
 def create_super_admin():
     conn = get_db_connection()
     admin = conn.execute(
@@ -191,158 +260,22 @@ def create_super_admin():
 
     conn.close()
 
-
+# Voters
 @app.route("/voter")
+@login_required
 def voter_dashboard():
     return "Welcome Voter! Session active."
 
-def admin_required():
-    if "user_id" not in session or session.get("role") != "admin":
-        flash("Admin access required")
-        return False
-    return True
+# Logout
+@app.route("/logout")
+@login_required
+def logout():
+    session.clear()
+    flash("Logged out successfully", "success")
+    return redirect(url_for("login"))
 
-
-
-@app.route("/")
-def home():
-    return "Online Voting System is running!"
-
-@app.route("/init-db")
-def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            aadhaar_number TEXT UNIQUE NOT NULL,
-            voter_id TEXT UNIQUE NOT NULL,
-            role TEXT NOT NULL
-);
-
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS elections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            is_active INTEGER NOT NULL
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            election_id INTEGER,
-            FOREIGN KEY (election_id) REFERENCES elections(id)
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            election_id INTEGER,
-            candidate_id INTEGER,
-            UNIQUE(user_id, election_id),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (election_id) REFERENCES elections(id),
-            FOREIGN KEY (candidate_id) REFERENCES candidates(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    return "Database tables created successfully!"
-
-
-# @app.route("/add-sample-data")
-# def add_sample_data():
-#     conn = get_db_connection()
-#     cursor = conn.cursor()
-
-    # Insert admin
-    cursor.execute("""
-        INSERT INTO users (name, aadhaar, voter_id)
-        VALUES (?, ?, ?)
-    """, ("Admin User", "111122223333", "ADMIN001"))
-
-    # Insert voter
-    cursor.execute("""
-        INSERT INTO users (name, aadhaar, voter_id)
-        VALUES (?, ?, ?)
-    """, ("Voter One", "444455556666", "VOTER001"))
-
-    # Insert election
-    cursor.execute("""
-        INSERT INTO elections (title, is_active)
-        VALUES (?, ?)
-    """, ("Student Council Election", 1))
-
-    # Insert candidate
-    cursor.execute("""
-        INSERT INTO candidates (name, election_id)
-        VALUES (?, ?)
-    """, ("Candidate A", 1))
-
-    conn.commit()
-    conn.close()
-
-    return "Sample data inserted successfully!"
-
-
-@app.route("/view-users")
-def view_users():
-    conn = get_db_connection()
-    users = conn.execute("SELECT * FROM users").fetchall()
-    conn.close()
-
-    result = ""
-    for user in users:
-        result += (
-            f"ID: {user['id']}, "
-            f"Name: {user['full_name']}, "
-            f"Email: {user['email']}, "
-            f"Aadhaar: {user['aadhaar_number']}, "
-            f"Voter ID: {user['voter_id']}, "
-            f"Role: {user['role']}<br>"
-        )
-
-    return result
-
-
-
-@app.route("/view-elections")
-def view_elections():
-    conn = get_db_connection()
-    elections = conn.execute("SELECT * FROM elections").fetchall()
-    conn.close()
-
-    result = ""
-    for election in elections:
-        result += f"ID: {election['id']}, Title: {election['title']}, Active: {election['is_active']}<br>"
-
-    return result
-
-
-@app.route("/view-candidates")
-def view_candidates():
-    conn = get_db_connection()
-    candidates = conn.execute("SELECT * FROM candidates").fetchall()
-    conn.close()
-
-    result = ""
-    for candidate in candidates:
-        result += f"ID: {candidate['id']}, Name: {candidate['name']}, Election ID: {candidate['election_id']}<br>"
-
-    return result
 
 
 if __name__ == "__main__":
+    create_super_admin()
     app.run(debug=True)
