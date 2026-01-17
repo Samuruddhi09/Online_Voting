@@ -352,6 +352,21 @@ def create_candidates_table():
     """)
     conn.commit()
     conn.close()
+    
+def create_votes_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            election_id INTEGER NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            voted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, election_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 
 # Add Candidates
@@ -482,12 +497,181 @@ def admin_view_candidates(election_id):
         election=election,
         candidates=candidates
     )
+    
+@app.route("/admin/close-election/<int:election_id>", methods=["POST"])
+@login_required
+@admin_required
+def close_election(election_id):
+    conn = get_db_connection()
 
+    election = conn.execute(
+        "SELECT status FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("admin_elections"))
+
+    if election["status"] != "active":
+        conn.close()
+        flash("Only active elections can be closed", "warning")
+        return redirect(url_for("admin_elections"))
+
+    conn.execute(
+        "UPDATE elections SET status = 'closed' WHERE id = ?",
+        (election_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Election closed successfully", "success")
+    return redirect(url_for("admin_elections"))
+
+
+@app.route("/debug/votes")
+@login_required
+@admin_required
+def debug_votes():
+    conn = get_db_connection()
+    votes = conn.execute("SELECT * FROM votes").fetchall()
+    conn.close()
+    return str([dict(v) for v in votes])
+
+# Activation of Election
+@app.route("/admin/activate-election/<int:election_id>", methods=["POST"])
+@login_required
+@admin_required
+def activate_election(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT status FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("admin_elections"))
+
+    if election["status"] != "upcoming":
+        conn.close()
+        flash("Only upcoming elections can be activated", "warning")
+        return redirect(url_for("admin_elections"))
+
+    conn.execute(
+        "UPDATE elections SET status = 'active' WHERE id = ?",
+        (election_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Election activated successfully", "success")
+    return redirect(url_for("admin_elections"))
+
+@app.route("/voter/elections")
+@login_required
+def voter_elections():
+    conn = get_db_connection()
+    elections = conn.execute("""
+        SELECT id, title, description
+        FROM elections
+        WHERE status = 'active'
+        ORDER BY id DESC
+    """).fetchall()
+    conn.close()
+
+    return render_template(
+        "voter/elections.html",
+        elections=elections
+    )
+
+@app.route("/voter/vote/<int:election_id>", methods=["GET", "POST"])
+@login_required
+def vote(election_id):
+    conn = get_db_connection()
+
+    # 1. Check election
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("voter_elections"))
+
+    if election["status"] != "active":
+        conn.close()
+        flash("Voting is not allowed for this election", "warning")
+        return redirect(url_for("voter_elections"))
+
+    # 2. Check if user already voted
+    existing_vote = conn.execute(
+        "SELECT id FROM votes WHERE user_id = ? AND election_id = ?",
+        (session["user_id"], election_id)
+    ).fetchone()
+
+    if existing_vote:
+        conn.close()
+        flash("You have already voted in this election", "info")
+        return redirect(url_for("voter_elections"))
+
+    # 3. Handle vote submission
+    if request.method == "POST":
+        candidate_id = request.form.get("candidate_id")
+
+        candidate = conn.execute(
+            "SELECT id FROM candidates WHERE id = ? AND election_id = ?",
+            (candidate_id, election_id)
+        ).fetchone()
+
+        if candidate is None:
+            conn.close()
+            flash("Invalid candidate selection", "danger")
+            return redirect(request.url)
+
+        try:
+            conn.execute("""
+                INSERT INTO votes (user_id, election_id, candidate_id)
+                VALUES (?, ?, ?)
+            """, (session["user_id"], election_id, candidate_id))
+            conn.commit()
+            flash("Your vote has been recorded successfully", "success")
+        except sqlite3.IntegrityError:
+            flash("Duplicate vote attempt blocked", "warning")
+
+        conn.close()
+        return redirect(url_for("voter_elections"))
+
+    # 4. Show candidates
+    candidates = conn.execute("""
+        SELECT 
+            c.id,
+            c.display_name,
+            c.party_or_description,
+            u.full_name
+        FROM candidates c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.election_id = ?
+    """, (election_id,)).fetchall()
+
+    conn.close()
+    return render_template(
+        "voter/vote.html",
+        election=election,
+        candidates=candidates
+    )
 
 
 if __name__ == "__main__":
     create_users_table()
     create_elections_table()
     create_candidates_table()
+    create_votes_table()
     create_super_admin()
     app.run(debug=True)
+

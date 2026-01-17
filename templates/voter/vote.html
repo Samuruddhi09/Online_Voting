@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vote</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container mt-5">
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white text-center">
+            <h4>Vote — {{ election.title }}</h4>
+        </div>
+
+        <div class="card-body">
+            <form method="POST">
+                {% for candidate in candidates %}
+                <div class="form-check mb-2">
+                    <input class="form-check-input"
+                           type="radio"
+                           name="candidate_id"
+                           value="{{ candidate.id }}"
+                           required>
+                    <label class="form-check-label">
+                        <strong>{{ candidate.display_name }}</strong>
+                        <br>
+                        <small class="text-muted">
+                            {{ candidate.party_or_description or "Independent" }}
+                        </small>
+                    </label>
+                </div>
+                {% endfor %}
+
+                <div class="text-center mt-4">
+                    <button class="btn btn-success">Submit Vote</button>
+                    <a href="/voter/elections" class="btn btn-secondary ms-2">
+                        Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

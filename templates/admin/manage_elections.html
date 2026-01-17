@@ -31,15 +31,33 @@
                         <td>{{ election.title }}</td>
                         <td>{{ election.status }}</td>
                         <td>
-                            <a href="/admin/add-candidate/{{ election.id }}"
-                               class="btn btn-sm btn-success">
-                                Add Candidate
-                            </a>
-                            <a href="/admin/election/{{ election.id }}/candidates"
-                               class="btn btn-sm btn-info ms-1">
-                                View Candidates
-                            </a>
+                            {% if election.status == "upcoming" %}
+                                <form action="/admin/activate-election/{{ election.id }}" method="post" class="d-inline">
+                                    <button class="btn btn-sm btn-primary">Activate</button>
+                                </form>
+                                <a href="/admin/add-candidate/{{ election.id }}"
+                                class="btn btn-sm btn-success ms-1">
+                                    Add Candidate
+                                </a>
+
+                            {% elif election.status == "active" %}
+                                <form action="/admin/close-election/{{ election.id }}" method="post" class="d-inline">
+                                    <button class="btn btn-sm btn-danger">Close</button>
+                                </form>
+                                <a href="/admin/election/{{ election.id }}/candidates"
+                                class="btn btn-sm btn-info ms-1">
+                                    View Candidates
+                                </a>
+
+                            {% else %}
+                                <span class="badge bg-secondary">Closed</span>
+                                <a href="/admin/election/{{ election.id }}/candidates"
+                                class="btn btn-sm btn-info ms-1">
+                                    View Candidates
+                                </a>
+                            {% endif %}
                         </td>
+
                     </tr>
                     {% endfor %}
                 </tbody>
