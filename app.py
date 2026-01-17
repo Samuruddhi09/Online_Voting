@@ -127,11 +127,17 @@ def login_required(view_func):
 def admin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please login first", "danger")
+            return redirect(url_for("login"))
+
         if session.get("role") != "admin":
             flash("Admin access required", "danger")
             return redirect(url_for("login"))
+
         return view_func(*args, **kwargs)
     return wrapper
+
 
 
 # Admin and Functions
@@ -139,7 +145,7 @@ def admin_required(view_func):
 @admin_required
 @login_required
 def admin_dashboard():
-    return render_template("admin_dashboard.html")
+    return render_template("admin/admin_dashboard.html")
 
 
 @app.route("/admin/users")
@@ -154,7 +160,7 @@ def admin_users():
     """, (session["user_id"],)).fetchall()
     conn.close()
 
-    return render_template("admin_users.html", users=users)
+    return render_template("admin/admin_users.html", users=users)
 
 
 @app.route("/admin/delete-user/<int:user_id>", methods=["POST"])
@@ -273,6 +279,33 @@ def logout():
     session.clear()
     flash("Logged out successfully", "success")
     return redirect(url_for("login"))
+
+
+# Election Creation 
+@app.route("/admin/create-election", methods=["GET", "POST"])
+@login_required
+@admin_required
+def create_election():
+    if request.method == "POST":
+        title = request.form.get("title")
+        description = request.form.get("description")
+
+        if not title:
+            flash("Election title is required", "danger")
+            return redirect(url_for("create_election"))
+
+        conn = get_db_connection()
+        conn.execute("""
+            INSERT INTO elections (title, description, created_by)
+            VALUES (?, ?, ?)
+        """, (title, description, session["user_id"]))
+        conn.commit()
+        conn.close()
+
+        flash("Election created successfully (status: upcoming)", "success")
+        return redirect(url_for("admin_dashboard"))
+
+    return render_template("admin/create_election.html")
 
 
 
