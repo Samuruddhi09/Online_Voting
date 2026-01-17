@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, flash, redirect, url_for, session
 import sqlite3
-from werkzeug.security import generate_password_hash,check_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
 
@@ -307,8 +307,187 @@ def create_election():
 
     return render_template("admin/create_election.html")
 
+def create_elections_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT CHECK(status IN ('upcoming', 'active', 'closed')) NOT NULL DEFAULT 'upcoming',
+            created_by INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+    
+
+def create_users_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            aadhaar_number TEXT UNIQUE NOT NULL,
+            voter_id TEXT UNIQUE NOT NULL,
+            role TEXT CHECK(role IN ('voter', 'admin')) NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def create_candidates_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            election_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            party_or_description TEXT,
+            UNIQUE (election_id, user_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+# Add Candidates
+@app.route("/admin/add-candidate/<int:election_id>", methods=["GET", "POST"])
+@login_required
+@admin_required
+def add_candidate(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    if election["status"] == "closed":
+        conn.close()
+        flash("Cannot add candidates to a closed election", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    if request.method == "POST":
+        user_id = request.form.get("user_id")
+        display_name = request.form.get("display_name")
+        description = request.form.get("party_or_description")
+
+        user = conn.execute(
+            "SELECT id, role FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if user is None:
+            conn.close()
+            flash("User does not exist", "danger")
+            return redirect(request.url)
+
+        if user["role"] == "admin":
+            conn.close()
+            flash("Admin cannot be a candidate", "danger")
+            return redirect(request.url)
+
+        try:
+            conn.execute("""
+                INSERT INTO candidates
+                (election_id, user_id, display_name, party_or_description)
+                VALUES (?, ?, ?, ?)
+            """, (election_id, user_id, display_name, description))
+            conn.commit()
+            flash("Candidate added successfully", "success")
+        except sqlite3.IntegrityError:
+            flash("Candidate already added to this election", "warning")
+
+        conn.close()
+        return redirect(request.url)
+
+    users = conn.execute(
+        "SELECT id, full_name, voter_id FROM users WHERE role != 'admin'"
+    ).fetchall()
+
+    print("USERS DATA:", users)
+    
+    conn.close()
+    return render_template(
+        "admin/add_candidate.html",
+        election=election,
+        users=users
+    )
+
+@app.route("/admin/elections")
+@login_required
+@admin_required
+def admin_elections():
+    conn = get_db_connection()
+    elections = conn.execute(
+        "SELECT * FROM elections ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+
+    return render_template("admin/manage_elections.html", elections=elections)
+
+
+@app.route("/debug/elections")
+@login_required
+@admin_required
+def debug_elections():
+    conn = get_db_connection()
+    elections = conn.execute(
+        "SELECT id, title FROM elections"
+    ).fetchall()
+    conn.close()
+    return str([dict(e) for e in elections])
+
+
+# View Candidates
+@app.route("/admin/election/<int:election_id>/candidates")
+@login_required
+@admin_required
+def admin_view_candidates(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("admin_elections"))
+
+    candidates = conn.execute("""
+        SELECT 
+            c.display_name,
+            c.party_or_description,
+            u.full_name,
+            u.voter_id
+        FROM candidates c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.election_id = ?
+    """, (election_id,)).fetchall()
+
+    conn.close()
+    return render_template(
+        "admin/view_candidates.html",
+        election=election,
+        candidates=candidates
+    )
+
 
 
 if __name__ == "__main__":
+    create_users_table()
+    create_elections_table()
+    create_candidates_table()
     create_super_admin()
     app.run(debug=True)
