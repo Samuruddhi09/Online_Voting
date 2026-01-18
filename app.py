@@ -571,6 +571,62 @@ def activate_election(election_id):
     flash("Election activated successfully", "success")
     return redirect(url_for("admin_elections"))
 
+@app.route("/admin/results/<int:election_id>")
+@admin_required
+def admin_results(election_id):
+    conn = get_db_connection()
+
+    # 1. Fetch election
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        abort(404)
+
+    # 2. Ensure election is closed
+    if election["status"] != "closed":
+        conn.close()
+        abort(403)
+
+    # 3. Fetch candidates with vote counts
+    results = conn.execute("""
+        SELECT 
+            c.id AS candidate_id,
+            u.full_name AS candidate_name,
+            c.party,
+            COUNT(v.id) AS vote_count
+        FROM candidates c
+        JOIN users u ON c.user_id = u.id
+        LEFT JOIN votes v 
+            ON c.id = v.candidate_id 
+            AND v.election_id = ?
+        WHERE c.election_id = ?
+        GROUP BY c.id
+        ORDER BY vote_count DESC
+    """, (election_id, election_id)).fetchall()
+
+    conn.close()
+
+    # 4. Determine winner(s)
+    max_votes = 0
+    winners = []
+
+    if results:
+        max_votes = max(row["vote_count"] for row in results)
+        winners = [row["candidate_id"] for row in results if row["vote_count"] == max_votes]
+
+    return render_template(
+        "admin/admin_results.html",
+        election=election,
+        results=results,
+        winners=winners,
+        max_votes=max_votes
+    )
+
+
 @app.route("/voter/elections")
 @login_required
 def voter_elections():

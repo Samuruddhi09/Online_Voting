@@ -15,8 +15,8 @@
 
         <div class="card-body">
             {% if elections %}
-            <table class="table table-bordered text-center">
-                <thead>
+            <table class="table table-bordered text-center align-middle">
+                <thead class="table-dark">
                     <tr>
                         <th>ID</th>
                         <th>Election Title</th>
@@ -29,35 +29,51 @@
                     <tr>
                         <td>{{ election.id }}</td>
                         <td>{{ election.title }}</td>
-                        <td>{{ election.status }}</td>
                         <td>
+                            <span class="badge 
+                                {% if election.status == 'upcoming' %}bg-secondary
+                                {% elif election.status == 'active' %}bg-success
+                                {% else %}bg-dark{% endif %}">
+                                {{ election.status }}
+                            </span>
+                        </td>
+                        <td>
+
                             {% if election.status == "upcoming" %}
-                                <form action="/admin/activate-election/{{ election.id }}" method="post" class="d-inline">
+                                <form action="/admin/activate-election/{{ election.id }}"
+                                    method="post" class="d-inline">
                                     <button class="btn btn-sm btn-primary">Activate</button>
                                 </form>
+
                                 <a href="/admin/add-candidate/{{ election.id }}"
                                 class="btn btn-sm btn-success ms-1">
                                     Add Candidate
                                 </a>
 
                             {% elif election.status == "active" %}
-                                <form action="/admin/close-election/{{ election.id }}" method="post" class="d-inline">
+                                <form action="/admin/close-election/{{ election.id }}"
+                                    method="post" class="d-inline">
                                     <button class="btn btn-sm btn-danger">Close</button>
                                 </form>
+
                                 <a href="/admin/election/{{ election.id }}/candidates"
                                 class="btn btn-sm btn-info ms-1">
                                     View Candidates
                                 </a>
 
                             {% else %}
-                                <span class="badge bg-secondary">Closed</span>
                                 <a href="/admin/election/{{ election.id }}/candidates"
-                                class="btn btn-sm btn-info ms-1">
+                                class="btn btn-sm btn-info">
                                     View Candidates
                                 </a>
-                            {% endif %}
-                        </td>
 
+                                <a href="{{ url_for('admin_results', election_id=election.id) }}"
+                                class="btn btn-sm btn-success ms-1">
+                                    View Results
+                                </a>
+                            {% endif %}
+
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
