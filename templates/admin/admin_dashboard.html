@@ -12,23 +12,32 @@
         <div class="card-header bg-primary text-white text-center">
             <h4>Admin Dashboard</h4>
         </div>
+
         <div class="card-body text-center">
-            <p class="mb-3">Welcome, Super_Admin </p>
+            <p class="mb-4">
+                Welcome, <strong>Super Admin</strong>
+            </p>
 
-            <a href="/admin/users" class="btn btn-warning">
-                Manage Users
-            </a>
+            <!-- ACTION BUTTONS -->
+            <div class="d-grid gap-3 col-6 mx-auto">
+                <a href="/admin/users" class="btn btn-warning">
+                    Manage Users
+                </a>
 
-            <a href="/admin/elections" class="btn btn-success">
-                Manage Elections
-            </a>
-            <a href="/admin/create-election" class="btn btn-success me-2">
-                Create Election
-            </a>
+                <a href="/admin/elections" class="btn btn-success">
+                    Manage Elections
+                </a>
 
+                <a href="/admin/create-election" class="btn btn-outline-success">
+                    Create Election
+                </a>
+            </div>
 
-            <div class="mt-3">
-                <a href="/logout" class="btn btn-secondary btn-sm">Logout</a>
+            <!-- LOGOUT -->
+            <div class="mt-4">
+                <a href="/logout" class="btn btn-secondary btn-sm">
+                    Logout
+                </a>
             </div>
         </div>
     </div>

@@ -276,7 +276,33 @@ def create_super_admin():
 @app.route("/voter")
 @login_required
 def voter_dashboard():
-    return "Welcome Voter! Session active."
+    return render_template("voter/voter_dashboard.html")
+
+@app.route("/voter/results/<int:election_id>")
+@login_required
+def voter_results_alias(election_id):
+    return redirect(url_for("public_results", election_id=election_id))
+
+@app.route("/voter/results")
+@login_required
+def voter_results_list():
+    conn = get_db_connection()
+
+    elections = conn.execute("""
+        SELECT id, title, status
+        FROM elections
+        WHERE status = 'closed'
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "voter/results_list.html",
+        elections=elections
+    )
+
+
 
 # Logout
 @app.route("/logout")
