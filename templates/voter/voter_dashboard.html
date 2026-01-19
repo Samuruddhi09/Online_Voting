@@ -7,31 +7,32 @@
 </head>
 <body class="bg-light">
 
-<nav class="navbar navbar-dark bg-dark">
-    <div class="container">
-        <a class="navbar-brand" href="/">Online Voting</a>
-        <a href="/logout" class="btn btn-outline-light btn-sm">Logout</a>
-    </div>
-</nav>
-
 <div class="container mt-5">
     <div class="card shadow text-center">
         <div class="card-header bg-success text-white">
             <h4>Voter Dashboard</h4>
         </div>
+
         <div class="card-body">
-            <p class="lead">
+            <p class="mb-4">
                 Welcome! Your session is active.
             </p>
 
-            <a href="/voter/elections" class="btn btn-primary mb-2">
-                View Active Elections
-            </a>
-            <br>
-            <a href="/voter/results" class="btn btn-outline-primary">
-                View Election Results
-            </a>
+            <div class="d-grid gap-3 col-6 mx-auto">
+                <a href="/voter/elections" class="btn btn-primary">
+                    View Active Elections
+                </a>
 
+                <a href="/voter/results" class="btn btn-outline-primary">
+                    View Election Results
+                </a>
+            </div>
+
+            <div class="mt-4">
+                <a href="/logout" class="btn btn-secondary btn-sm">
+                    Logout
+                </a>
+            </div>
         </div>
     </div>
 </div>
