@@ -19,6 +19,196 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please login first", "danger")
+            return redirect(url_for("login"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please login first", "danger")
+            return redirect(url_for("login"))
+
+        if session.get("role") != "admin":
+            flash("Admin access required", "danger")
+            return redirect(url_for("login"))
+
+        return view_func(*args, **kwargs)
+    return wrapper
+
+# Super_admin
+def create_super_admin():
+    conn = get_db_connection()
+    admin = conn.execute(
+        "SELECT * FROM users WHERE voter_id = ?",
+        ("SUPERADMIN",)
+    ).fetchone()
+
+    if admin is None:
+        conn.execute("""
+            INSERT INTO users
+            (full_name, email, password, aadhaar_number, voter_id, role)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            "Super Admin",
+            "superadmin@ovs.com",
+            generate_password_hash("admin123"),
+            "000000000000",
+            "SUPERADMIN",
+            "admin"
+        ))
+        conn.commit()
+
+    conn.close()
+
+def compute_election_analytics(election_id):
+    conn = get_db_connection()
+
+    # Get total registered voters
+    total_voters = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE role = 'voter'"
+    ).fetchone()[0]
+
+    # Get candidates with vote counts
+    rows = conn.execute("""
+        SELECT 
+            c.id AS candidate_id,
+            c.name AS candidate_name,
+            COUNT(v.id) AS vote_count
+        FROM candidates c
+        LEFT JOIN votes v 
+            ON v.candidate_id = c.id 
+            AND v.election_id = ?
+        WHERE c.election_id = ?
+        GROUP BY c.id
+        ORDER BY vote_count DESC
+    """, (election_id, election_id)).fetchall()
+
+    # Total votes cast
+    total_votes = sum(row["vote_count"] for row in rows)
+
+    # Turnout percentage
+    turnout_percentage = (
+        round((total_votes / total_voters) * 100, 2)
+        if total_voters > 0 else 0
+    )
+
+    candidates = []
+    for row in rows:
+        vote_percentage = (
+            round((row["vote_count"] / total_votes) * 100, 2)
+            if total_votes > 0 else 0
+        )
+
+        candidates.append({
+            "id": row["candidate_id"],
+            "name": row["candidate_name"],
+            "votes": row["vote_count"],
+            "percentage": vote_percentage
+        })
+
+    # Winner & margin
+    winner = None
+    winning_margin = 0
+    is_tie = False
+
+    if candidates:
+        top_votes = candidates[0]["votes"]
+        top_candidates = [c for c in candidates if c["votes"] == top_votes]
+
+        if len(top_candidates) > 1:
+            is_tie = True
+        else:
+            winner = top_candidates[0]
+
+            if len(candidates) > 1:
+                winning_margin = top_votes - candidates[1]["votes"]
+
+    conn.close()
+
+    return {
+        "total_voters": total_voters,
+        "total_votes": total_votes,
+        "turnout_percentage": turnout_percentage,
+        "candidates": candidates,
+        "winner": winner,
+        "winning_margin": winning_margin,
+        "is_tie": is_tie
+    }
+
+
+# Tables
+def create_elections_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT CHECK(status IN ('upcoming', 'active', 'closed')) NOT NULL DEFAULT 'upcoming',
+            created_by INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+    
+
+def create_users_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            aadhaar_number TEXT UNIQUE NOT NULL,
+            voter_id TEXT UNIQUE NOT NULL,
+            role TEXT CHECK(role IN ('voter', 'admin')) NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def create_candidates_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            election_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            party_or_description TEXT,
+            UNIQUE (election_id, user_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+    
+def create_votes_table():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            election_id INTEGER NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            voted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, election_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+    
+
+# routes
+
 #home page
 @app.route("/")
 def home():
@@ -121,28 +311,13 @@ def login():
 
     return render_template("login.html")
 
-def login_required(view_func):
-    @wraps(view_func)
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            flash("Please login first", "danger")
-            return redirect(url_for("login"))
-        return view_func(*args, **kwargs)
-    return wrapper
-
-def admin_required(view_func):
-    @wraps(view_func)
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            flash("Please login first", "danger")
-            return redirect(url_for("login"))
-
-        if session.get("role") != "admin":
-            flash("Admin access required", "danger")
-            return redirect(url_for("login"))
-
-        return view_func(*args, **kwargs)
-    return wrapper
+# Logout
+@app.route("/logout")
+@login_required
+def logout():
+    session.clear()
+    flash("Logged out successfully", "success")
+    return redirect(url_for("login"))
 
 
 
@@ -247,72 +422,6 @@ def update_role(user_id):
     return redirect(url_for("admin_users"))
 
 
-# Super_admin
-def create_super_admin():
-    conn = get_db_connection()
-    admin = conn.execute(
-        "SELECT * FROM users WHERE voter_id = ?",
-        ("SUPERADMIN",)
-    ).fetchone()
-
-    if admin is None:
-        conn.execute("""
-            INSERT INTO users
-            (full_name, email, password, aadhaar_number, voter_id, role)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            "Super Admin",
-            "superadmin@ovs.com",
-            generate_password_hash("admin123"),
-            "000000000000",
-            "SUPERADMIN",
-            "admin"
-        ))
-        conn.commit()
-
-    conn.close()
-
-# Voters
-@app.route("/voter")
-@login_required
-def voter_dashboard():
-    return render_template("voter/voter_dashboard.html")
-
-@app.route("/voter/results/<int:election_id>")
-@login_required
-def voter_results_alias(election_id):
-    return redirect(url_for("public_results", election_id=election_id))
-
-@app.route("/voter/results")
-@login_required
-def voter_results_list():
-    conn = get_db_connection()
-
-    elections = conn.execute("""
-        SELECT id, title, status
-        FROM elections
-        WHERE status = 'closed'
-        ORDER BY id DESC
-    """).fetchall()
-
-    conn.close()
-
-    return render_template(
-        "voter/results_list.html",
-        elections=elections
-    )
-
-
-
-# Logout
-@app.route("/logout")
-@login_required
-def logout():
-    session.clear()
-    flash("Logged out successfully", "success")
-    return redirect(url_for("login"))
-
-
 # Election Creation 
 @app.route("/admin/create-election", methods=["GET", "POST"])
 @login_required
@@ -338,68 +447,6 @@ def create_election():
         return redirect(url_for("admin_dashboard"))
 
     return render_template("admin/create_election.html")
-
-def create_elections_table():
-    conn = get_db_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS elections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            status TEXT CHECK(status IN ('upcoming', 'active', 'closed')) NOT NULL DEFAULT 'upcoming',
-            created_by INTEGER NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-    
-
-def create_users_table():
-    conn = get_db_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            aadhaar_number TEXT UNIQUE NOT NULL,
-            voter_id TEXT UNIQUE NOT NULL,
-            role TEXT CHECK(role IN ('voter', 'admin')) NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def create_candidates_table():
-    conn = get_db_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            election_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            display_name TEXT NOT NULL,
-            party_or_description TEXT,
-            UNIQUE (election_id, user_id)
-        )
-    """)
-    conn.commit()
-    conn.close()
-    
-def create_votes_table():
-    conn = get_db_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            election_id INTEGER NOT NULL,
-            candidate_id INTEGER NOT NULL,
-            voted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (user_id, election_id)
-        )
-    """)
-    conn.commit()
-    conn.close()
-
 
 # Add Candidates
 @app.route("/admin/add-candidate/<int:election_id>", methods=["GET", "POST"])
@@ -482,19 +529,6 @@ def admin_elections():
 
     return render_template("admin/manage_elections.html", elections=elections)
 
-
-@app.route("/debug/elections")
-@login_required
-@admin_required
-def debug_elections():
-    conn = get_db_connection()
-    elections = conn.execute(
-        "SELECT id, title FROM elections"
-    ).fetchall()
-    conn.close()
-    return str([dict(e) for e in elections])
-
-
 # View Candidates
 @app.route("/admin/election/<int:election_id>/candidates")
 @login_required
@@ -561,48 +595,6 @@ def close_election(election_id):
     flash("Election closed successfully", "success")
     return redirect(url_for("admin_elections"))
 
-
-@app.route("/debug/votes")
-@login_required
-@admin_required
-def debug_votes():
-    conn = get_db_connection()
-    votes = conn.execute("SELECT * FROM votes").fetchall()
-    conn.close()
-    return str([dict(v) for v in votes])
-
-# Activation of Election
-@app.route("/admin/activate-election/<int:election_id>", methods=["POST"])
-@login_required
-@admin_required
-def activate_election(election_id):
-    conn = get_db_connection()
-
-    election = conn.execute(
-        "SELECT status FROM elections WHERE id = ?",
-        (election_id,)
-    ).fetchone()
-
-    if election is None:
-        conn.close()
-        flash("Election not found", "danger")
-        return redirect(url_for("admin_elections"))
-
-    if election["status"] != "upcoming":
-        conn.close()
-        flash("Only upcoming elections can be activated", "warning")
-        return redirect(url_for("admin_elections"))
-
-    conn.execute(
-        "UPDATE elections SET status = 'active' WHERE id = ?",
-        (election_id,)
-    )
-    conn.commit()
-    conn.close()
-
-    flash("Election activated successfully", "success")
-    return redirect(url_for("admin_elections"))
-
 @app.route("/admin/results/<int:election_id>")
 @admin_required
 def admin_results(election_id):
@@ -658,6 +650,91 @@ def admin_results(election_id):
         max_votes=max_votes
     )
 
+# Activation of Election
+@app.route("/admin/activate-election/<int:election_id>", methods=["POST"])
+@login_required
+@admin_required
+def activate_election(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT status FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if election is None:
+        conn.close()
+        flash("Election not found", "danger")
+        return redirect(url_for("admin_elections"))
+
+    if election["status"] != "upcoming":
+        conn.close()
+        flash("Only upcoming elections can be activated", "warning")
+        return redirect(url_for("admin_elections"))
+
+    conn.execute(
+        "UPDATE elections SET status = 'active' WHERE id = ?",
+        (election_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Election activated successfully", "success")
+    return redirect(url_for("admin_elections"))
+
+# Voters
+@app.route("/voter")
+@login_required
+def voter_dashboard():
+    return render_template("voter/voter_dashboard.html")
+
+@app.route("/voter/results/<int:election_id>")
+@login_required
+def voter_results_alias(election_id):
+    return redirect(url_for("public_results", election_id=election_id))
+
+@app.route("/voter/results")
+@login_required
+def voter_results_list():
+    conn = get_db_connection()
+
+    elections = conn.execute("""
+        SELECT id, title, status
+        FROM elections
+        WHERE status = 'closed'
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "voter/results_list.html",
+        elections=elections
+    )
+
+
+
+@app.route("/debug/elections")
+@login_required
+@admin_required
+def debug_elections():
+    conn = get_db_connection()
+    elections = conn.execute(
+        "SELECT id, title FROM elections"
+    ).fetchall()
+    conn.close()
+    return str([dict(e) for e in elections])
+
+
+
+@app.route("/debug/votes")
+@login_required
+@admin_required
+def debug_votes():
+    conn = get_db_connection()
+    votes = conn.execute("SELECT * FROM votes").fetchall()
+    conn.close()
+    return str([dict(v) for v in votes])
 
 
 @app.route("/voter/elections")
