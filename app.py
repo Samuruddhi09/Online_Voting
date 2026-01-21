@@ -682,6 +682,31 @@ def activate_election(election_id):
     flash("Election activated successfully", "success")
     return redirect(url_for("admin_elections"))
 
+@app.route("/admin/analytics/<int:election_id>")
+@admin_required
+def admin_analytics(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if not election:
+        conn.close()
+        flash("Election not found.", "danger")
+        return redirect(url_for("admin_dashboard"))
+
+    analytics = compute_election_analytics(election_id)
+
+    conn.close()
+    return render_template(
+        "admin/admin_analytics.html",
+        election=election,
+        analytics=analytics
+    )
+
+
 # Voters
 @app.route("/voter")
 @login_required
