@@ -108,4 +108,19 @@ This project demonstrates **software engineering fundamentals**, **manual testin
 - **UNIQUE (user_id, election_id)**
 
 ---
+## QA & Testing
+
+Manual testing was performed for this project.
+
+### Testing Activities:
+- Created manual test cases in Excel
+- Executed positive and negative scenarios
+- Validated role-based access and voting rules
+- Captured screenshots as execution evidence
+
+### QA Artifacts:
+- Test Cases: Online_Voting_Test_Cases.xlsx
+- Screenshots: /Screenshots
+
+This project demonstrates a practical manual QA approach.
 
