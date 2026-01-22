@@ -912,6 +912,36 @@ def public_results(election_id):
         max_votes=max_votes
     )
 
+@app.route("/analytics/<int:election_id>")
+@login_required
+def voter_analytics(election_id):
+    conn = get_db_connection()
+
+    election = conn.execute(
+        "SELECT * FROM elections WHERE id = ?",
+        (election_id,)
+    ).fetchone()
+
+    if not election:
+        conn.close()
+        flash("Election not found.", "danger")
+        return redirect(url_for("voter_dashboard"))
+
+    # IMPORTANT: voters can see analytics ONLY after election is closed
+    if election["status"] != "closed":
+        conn.close()
+        flash("Analytics are available only after the election is closed.", "warning")
+        return redirect(url_for("voter_dashboard"))
+
+    analytics = compute_election_analytics(election_id)
+
+    conn.close()
+    return render_template(
+        "voter/analytics.html",
+        election=election,
+        analytics=analytics
+    )
+
 
 if __name__ == "__main__":
     create_users_table()
