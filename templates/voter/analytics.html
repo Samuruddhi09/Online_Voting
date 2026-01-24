@@ -56,6 +56,16 @@
                         {% endfor %}
                     </tbody>
                 </table>
+
+                <!-- CHARTS -->
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <canvas id="votesBarChart"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <canvas id="votesPieChart"></canvas>
+                    </div>
+                </div>
             {% endif %}
 
             <!-- RESULT SUMMARY -->
@@ -81,6 +91,63 @@
         </div>
     </div>
 </div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+{% if analytics.total_votes > 0 %}
+<script>
+    const candidateLabels = [
+        {% for c in analytics.candidates %}
+            "{{ c.name }}",
+        {% endfor %}
+    ];
+
+    const voteCounts = [
+        {% for c in analytics.candidates %}
+            {{ c.votes }},
+        {% endfor %}
+    ];
+
+    const votePercentages = [
+        {% for c in analytics.candidates %}
+            {{ c.percentage }},
+        {% endfor %}
+    ];
+
+    // Bar Chart
+    new Chart(document.getElementById('votesBarChart'), {
+        type: 'bar',
+        data: {
+            labels: candidateLabels,
+            datasets: [{
+                label: 'Votes',
+                data: voteCounts
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+
+    // Pie Chart
+    new Chart(document.getElementById('votesPieChart'), {
+        type: 'pie',
+        data: {
+            labels: candidateLabels,
+            datasets: [{
+                data: votePercentages
+            }]
+        },
+        options: {
+            responsive: true
+        }
+    });
+</script>
+{% endif %}
 
 </body>
 </html>
